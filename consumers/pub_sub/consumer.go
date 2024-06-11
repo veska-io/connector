@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
-	"time"
 
 	"cloud.google.com/go/pubsub"
 )
@@ -45,14 +43,8 @@ func New(ctx context.Context, logger *slog.Logger,
 }
 
 func (c *Consumer) Run() {
-	ctx2, cancel := context.WithTimeout(c.ctx, 10*time.Second)
-	defer cancel()
 	sub := c.client.Subscription(c.subscriptionId)
-	var mu sync.Mutex
-	sub.Receive(ctx2, func(ctx context.Context, msg *pubsub.Message) {
-		mu.Lock()
-		defer mu.Unlock()
-
+	sub.Receive(c.ctx, func(ctx context.Context, msg *pubsub.Message) {
 		c.DataStream <- msg
 	})
 	close(c.DataStream)
