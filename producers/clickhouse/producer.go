@@ -37,7 +37,7 @@ type Producer struct {
 }
 
 func NewProducer(ctx context.Context, logger *slog.Logger,
-	host, database, username, password string, writeInterval time.Duration) (*Producer, error) {
+	host, database, username, password, table string, writeInterval time.Duration) (*Producer, error) {
 
 	conn, err := clickhouse.Open(&clickhouse.Options{
 		Addr: []string{host + ":9440"},
@@ -63,6 +63,7 @@ func NewProducer(ctx context.Context, logger *slog.Logger,
 		database: database,
 		username: username,
 		password: password,
+		table:    table,
 
 		DataStream:   make(chan Message),
 		StatusStream: make(chan []Message),
