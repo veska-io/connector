@@ -28,6 +28,7 @@ func TestConsumer(t *testing.T) {
 		"datafi-415911",
 		"trades-stream",
 		"clickhouse-connector",
+		10000,
 	)
 
 	if error != nil {
@@ -59,7 +60,6 @@ func subscribeWithProtoSchema(projectID, subID string) error {
 		return fmt.Errorf("pubsub.NewClient: %w", err)
 	}
 
-	// Create an instance of the message to be decoded (a single U.S. state).
 	state := &pbstms.Trade{}
 
 	sub := client.Subscription(subID)

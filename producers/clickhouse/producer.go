@@ -36,7 +36,7 @@ type Producer struct {
 	StatusStream chan []Message
 }
 
-func NewProducer(ctx context.Context, logger *slog.Logger,
+func New(ctx context.Context, logger *slog.Logger,
 	host, database, username, password, table string, writeInterval time.Duration) (*Producer, error) {
 
 	conn, err := clickhouse.Open(&clickhouse.Options{
@@ -72,46 +72,48 @@ func NewProducer(ctx context.Context, logger *slog.Logger,
 
 func (p *Producer) Run() {
 	defer close(p.StatusStream)
-	conn := *p.conn
-	batch, err := conn.PrepareBatch(p.ctx, "INSERT INTO "+p.table)
-	if err != nil {
-		p.logger.Error("failed to prepare batch", slog.String("err", err.Error()))
-	}
-
-	p.lastSend = time.Now()
+	batch := p.mustPrepareBatch()
 	localBatch := make([]Message, 0)
-	for msg := range p.DataStream {
-		err := batch.Append(msg.Data...)
-		if err != nil {
-			msg.Err = err
-			p.logger.Error("failed to append data to batch", slog.String("err", err.Error()))
-			p.StatusStream <- []Message{msg}
-		} else {
-			localBatch = append(localBatch, msg)
-		}
+	ticker := time.NewTicker(p.writeInterval)
 
-		if time.Since(p.lastSend) > p.writeInterval {
-			err := batch.Send()
+MainStream:
+	for {
+		select {
+		case <-p.ctx.Done():
+			p.logger.Info("terminating producer")
+			break MainStream
+		case msg, ok := <-p.DataStream:
+			if !ok {
+				break MainStream
+			}
+			err := batch.Append(msg.Data...)
 			if err != nil {
-				for _, localMsg := range localBatch {
-					localMsg.Err = err
+				msg.Err = err
+				p.logger.Error("failed to append data to batch", slog.String("err", err.Error()))
+				p.StatusStream <- []Message{msg}
+			} else {
+				localBatch = append(localBatch, msg)
+			}
+		case <-ticker.C:
+			if len(localBatch) > 0 {
+				err := batch.Send()
+				if err != nil {
+					for _, localMsg := range localBatch {
+						localMsg.Err = err
+					}
+
+					p.logger.Error("failed to send batch", slog.String("err", err.Error()))
 				}
+				p.StatusStream <- localBatch
 
-				p.logger.Error("failed to send batch", slog.String("err", err.Error()))
+				batch = p.mustPrepareBatch()
+				localBatch = make([]Message, 0)
 			}
-			p.StatusStream <- localBatch
-
-			batch, err = conn.PrepareBatch(p.ctx, "INSERT INTO "+p.table)
-			if err != nil {
-				p.logger.Error("failed to prepare batch", slog.String("err", err.Error()))
-			}
-			localBatch = make([]Message, 0)
-			p.lastSend = time.Now()
 		}
 	}
 
 	if len(localBatch) > 0 {
-		batch.Send()
+		err := batch.Send()
 		if err != nil {
 			for _, localMsg := range localBatch {
 				localMsg.Err = err
@@ -121,4 +123,14 @@ func (p *Producer) Run() {
 		}
 		p.StatusStream <- localBatch
 	}
+}
+
+func (p *Producer) mustPrepareBatch() driver.Batch {
+	conn := *p.conn
+	batch, err := conn.PrepareBatch(context.Background(), "INSERT INTO "+p.table)
+	if err != nil {
+		panic(err)
+	}
+
+	return batch
 }
