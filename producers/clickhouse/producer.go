@@ -37,7 +37,8 @@ type Producer struct {
 }
 
 func New(ctx context.Context, logger *slog.Logger,
-	host, database, username, password, table string, writeInterval time.Duration) (*Producer, error) {
+	host, database, username, password, table string, writeInterval time.Duration,
+) (*Producer, error) {
 
 	conn, err := clickhouse.Open(&clickhouse.Options{
 		Addr: []string{host + ":9440"},
@@ -50,6 +51,17 @@ func New(ctx context.Context, logger *slog.Logger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open clickhouse connection: %w", err)
+	}
+
+	if err := conn.Ping(ctx); err != nil {
+		if exception, ok := err.(*clickhouse.Exception); ok {
+			logger.Error("clickhouse ping failed",
+				slog.Int64("code", int64(exception.Code)),
+				slog.String("message", exception.Message),
+				slog.String("trace", exception.StackTrace),
+			)
+		}
+		return nil, err
 	}
 
 	return &Producer{
